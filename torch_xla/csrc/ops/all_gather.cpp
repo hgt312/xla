@@ -46,8 +46,28 @@ torch::lazy::NodePtr AllGather::Clone(torch::lazy::OpList operands) const {
                                           shard_count_, groups_, pin_layout_);
 }
 
+const torch::lazy::Output& SimplifyUnselect(const torch::lazy::Output& x) {
+  if (!xla::sys_util::GetEnvBool("SIMPLIFY_FOR_DEEPSPEED", false)) {
+    return x;
+  }
+  if (x.node->op() == xla_select) {
+    auto& y = x.node->operand(0);
+    if (y.node->op() == xla_unselect) {
+      return y.node->operand(1);
+    }
+  }
+  if (x.node->op() == xla_unselect) {
+    auto& y = x.node->operand(0);
+    if (y.node->op() == xla_select) {
+      return x.node->operand(1);
+    }
+  }
+  return x;
+}
+
 XlaOpVector AllGather::Lower(LoweringContext* loctx) const {
-  xla::XlaOp input = loctx->GetOutputOp(operand(0));
+  auto& input0 = SimplifyUnselect(SimplifyUnselect(operand(0)));
+  xla::XlaOp input = loctx->GetOutputOp(input0);
   xla::XlaOp token = loctx->GetOutputOp(operand(1));
   AllGatherResult result =
       BuildAllGather(input, token, dim_, shard_count_, groups_, pin_layout_);
