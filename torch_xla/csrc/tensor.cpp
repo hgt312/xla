@@ -45,6 +45,8 @@
 #include "torch_xla/csrc/ops/xla_ops.h"
 #include "torch_xla/csrc/tensor_util.h"
 #include "torch_xla/csrc/torch_util.h"
+#include "torch_xla/csrc/simplify_ir.h"
+#include "tensorflow/compiler/xla/service/hlo_pass_fix.h"
 
 namespace torch_xla {
 namespace {
@@ -1719,6 +1721,12 @@ XLATensor::CompilationResult XLATensor::Compile(
   }
   xla::Shape shape = MakeShapeWithDeviceLayout(
       program_shape.result(), static_cast<XlaDeviceType>(coll.device.type()));
+
+  xla::HloModuleConfig module_config(program_shape);
+  auto module = xla::HloModule::CreateFromProto(computation.proto(), module_config).ValueOrDie();
+  auto simplify_pass = xla::HloPassFix<IRSimplifier>();
+  simplify_pass.Run(module.get());
+  computation = xla::XlaComputation(module->ToProto());
 
   std::vector<xla::ComputationClient::CompileInstance> instances;
   instances.push_back({std::move(computation), coll.device.toString(),
